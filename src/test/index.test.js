@@ -1,6 +1,6 @@
 import test from 'tape'
 
-import advisoryLock, { strToKey } from '../src'
+import advisoryLock, { strToKey } from '../'
 import { conString, timeout } from './common'
 
 test('strToKey', (t) => {

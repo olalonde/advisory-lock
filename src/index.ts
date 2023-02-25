@@ -7,7 +7,7 @@ const noop = () => {}
 
 // Converts string to 64 bit number for use with postgres advisory lock
 // functions
-export const strToKey = (name) => {
+export const strToKey = (name: string): AdvisoryKey => {
   // TODO: detect "in process" collisions?
   // Generate sha256 hash of name
   // and take 32 bit twice from hash
@@ -19,30 +19,33 @@ export const strToKey = (name) => {
 
 // Patches client so that unref works as expected... Node terminates
 // only if there are not pending queries
-const patchClient = (client) => {
+const patchClient = (client: pg.Client) => {
   const connect = client.connect.bind(client)
   const query = client.query.bind(client)
   let refCount = 0
 
   const ref = () => {
     refCount++
+    /* @ts-ignore */
     client.connection.stream.ref()
   }
   const unref = () => {
     refCount--
+    /* @ts-ignore */
     if (!refCount) client.connection.stream.unref()
   }
 
-  const wrap = (fn) => (...args) => {
+  const wrap = (fn: Function) => (...args: []) => {
     ref()
     const lastArg = args[args.length - 1]
     const lastArgIsCb = typeof lastArg === 'function'
     const outerCb = lastArgIsCb ? lastArg : noop
     if (lastArgIsCb) args.pop()
-    const cb = (...cbArgs) => {
+    const cb = (...cbArgs: []) => {
       unref()
       outerCb(...cbArgs)
     }
+    /* @ts-ignore */
     args.push(cb)
     return fn(...args)
   }
@@ -52,7 +55,9 @@ const patchClient = (client) => {
   return client
 }
 
-const query = (client, lockFn, [key1, key2]) => new Promise((resolve, reject) => {
+type AdvisoryKey = [number, number]; 
+
+const query = (client: pg.Client, lockFn: string, [key1, key2]: AdvisoryKey) => new Promise((resolve, reject) => {
   const sql = `SELECT ${lockFn}(${key1}, ${key2})`
   debug(`query: ${sql}`)
   client.query(sql, (err, result) => {
@@ -65,8 +70,8 @@ const query = (client, lockFn, [key1, key2]) => new Promise((resolve, reject) =>
 })
 
 // Pauses promise chain until pg client is connected
-const initWaitForConnection = (client) => {
-  const queue = []
+const initWaitForConnection = (client: pg.Client) => {
+  const queue: [(value?: any) => void, (err: any) => void][] = []
   let waitForConnect = true
   debug('connecting')
 
@@ -81,20 +86,24 @@ const initWaitForConnection = (client) => {
       queue.forEach(([resolve]) => resolve())
     }
   })
-  return () => new Promise((resolve, reject) => {
+  return () => new Promise<void>((resolve, reject) => {
     if (!waitForConnect) return resolve()
     debug('waiting for connection')
     queue.push([resolve, reject])
   })
 }
 
-export default (conString) => {
+interface FunctionObject {
+  [key: string]: (...args: any[]) => any;
+}
+
+export default (conString: string) => {
   debug(`connection string: ${conString}`)
   const client = patchClient(new pg.Client(conString))
   const waitForConnection = initWaitForConnection(client)
   // TODO: client.connection.stream.unref()?
 
-  const createMutex = (name) => {
+  const createMutex = (name: string) => {
     const key = typeof name === 'string' ? strToKey(name) : name
 
     const lock = () => query(client, 'pg_advisory_lock', key)
@@ -102,7 +111,7 @@ export default (conString) => {
     const tryLock = () => query(client, 'pg_try_advisory_lock', key)
 
     // TODO: catch db disconnection errors?
-    const withLock = (fn) => lock().then(() => Promise
+    const withLock = (fn: () => void) => lock().then(() => Promise
       .resolve()
       .then(fn)
       .then(
@@ -111,10 +120,10 @@ export default (conString) => {
       )
     )
 
-    const fns = { lock, unlock, tryLock, withLock }
+    const fns: FunctionObject = { lock, unlock, tryLock, withLock }
 
     // "Block" function calls until client is connected
-    const guardedFns = {}
+    const guardedFns: FunctionObject = {}
     Object.keys(fns).forEach((fnName) => {
       guardedFns[fnName] = (...args) => (
         waitForConnection().then(() => fns[fnName](...args))

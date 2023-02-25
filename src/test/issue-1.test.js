@@ -1,6 +1,6 @@
 import test from 'tape'
 import pg from 'pg'
-import advisoryLock from '../src'
+import advisoryLock from '../'
 import { conString, timeout } from './common'
 
 // Returns the number of active connections to the database
