@@ -1,35 +1,35 @@
 # advisory-lock
 
-[![Build Status](https://travis-ci.org/blockai/advisory-lock.svg?branch=master)](https://travis-ci.org/blockai/advisory-lock)
+[![Build Status](https://travis-ci.org/olalonde/advisory-lock.svg?branch=master)](https://travis-ci.org/olalonde/advisory-lock)
 
-Distributed* locking using [PostgreSQL advisory locks](http://www.postgresql.org/docs/current/static/explicit-locking.html#ADVISORY-LOCKS).
+Distributed\* locking using [PostgreSQL advisory locks](http://www.postgresql.org/docs/current/static/explicit-locking.html#ADVISORY-LOCKS).
 
 Some use cases:
 
 - You have a [clock process](https://devcenter.heroku.com/articles/scheduled-jobs-custom-clock-processes)
-    and want to make absolutely sure there will never be more than one
-    process active at any given time.
+  and want to make absolutely sure there will never be more than one
+  process active at any given time.
 
-    This sort of situation can otherwise arise if the clock process is
-    scaled up by accident or during a deployment which keeps the old
-    version running until the new version responds to a health check.
+  This sort of situation can otherwise arise if the clock process is
+  scaled up by accident or during a deployment which keeps the old
+  version running until the new version responds to a health check.
 
 - Running a database migration at server startup. If your app is scaled,
-    multiple processes will simultaneously try to run the database
-    migration which can lead to problems.
+  multiple processes will simultaneously try to run the database
+  migration which can lead to problems.
 
 - Leader election. Let's say you have a web app and want to post a
-    message to Slack every 30 mins containing some statistic (e.g. new
-    registrations in the last 30 mins). You might have 10 processes
-    running but don't want to get 10 identical messages in Slack.
-    You can use this library to elect a "master" process which
-    is responsible for sending the message.
+  message to Slack every 30 mins containing some statistic (e.g. new
+  registrations in the last 30 mins). You might have 10 processes
+  running but don't want to get 10 identical messages in Slack.
+  You can use this library to elect a "master" process which
+  is responsible for sending the message.
 
 - [etc.](https://www.google.com/?q=distributed+lock#newwindow=1&q=distributed+lock)
 
 \* Your PostgreSQL database being a central point of failure. For
-    a high available distributed lock, have a look at
-    [ZooKeeper](https://zookeeper.apache.org).
+a high available distributed lock, have a look at
+[ZooKeeper](https://zookeeper.apache.org).
 
 ## Install
 
@@ -74,9 +74,9 @@ that can be used to terminate the database connection if necessary.
 
 PS: Each call to `advisoryLock(connectionString)` creates a new PostgreSQL
 connection which is not automatically terminated, so if that is an
-[issue for you](https://github.com/blockai/advisory-lock/issues/1), you
+[issue for you](https://github.com/olalonde/advisory-lock/issues/1), you
 can use `createMutex.client.end()` to end the connection when
-appropriate (e.g.  after releasing a lock). This is however typically
+appropriate (e.g. after releasing a lock). This is however typically
 not needed since usually, `advisoryLock()` only needs to be called once.
 
 ### createMutex(lockName)
@@ -85,7 +85,7 @@ not needed since usually, `advisoryLock()` only needs to be called once.
 
 Returns a **mutex** object containing the functions listed below. All
 **object** methods are really just functions attached to the object and
-are not bound to *this* so they can be safely destructured,
+are not bound to _this_ so they can be safely destructured,
 e.g. `const { withLock } = createMutext(lockName)`.
 
 For a better understanding of what each functions does,
@@ -133,13 +133,15 @@ Same as `withLock()` but using a shared lock.
 ## Example
 
 ```javascript
-import advisoryLock from 'advisory-lock'
-const mutex = advisoryLock('postgres://user:pass@localhost:3475/dbname')('some-lock-name')
+import advisoryLock from "advisory-lock";
+const mutex = advisoryLock("postgres://user:pass@localhost:3475/dbname")(
+  "some-lock-name"
+);
 
 const doSomething = () => {
   // doSomething
-  return Promise.resolve()
-}
+  return Promise.resolve();
+};
 
 mutex
   .withLock(doSomething) // "blocks" until lock is free
@@ -148,18 +150,16 @@ mutex
   })
   .then(() => {
     // lock is released now...
-  })
+  });
 
 // doesn't "block"
 mutex.tryLock().then((obtainedLock) => {
   if (obtainedLock) {
-    return doSomething().then(() => mutex.unlock())
+    return doSomething().then(() => mutex.unlock());
   } else {
-    throw new Error('failed to obtain lock')
+    throw new Error("failed to obtain lock");
   }
-})
-
+});
 ```
 
 See [./test](./test) for more usage examples.
-
