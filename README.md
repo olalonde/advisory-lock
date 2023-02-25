@@ -38,6 +38,33 @@ a high available distributed lock, have a look at
 npm install --save advisory-lock
 ```
 
+## Example
+
+```javascript
+import advisoryLock from "advisory-lock";
+const mutex = advisoryLock("postgres://user:pass@localhost:3475/dbname")(
+  "some-lock-name"
+);
+
+// waits and blocks indefinitely for the lock before executing the function
+await mutex.withLock(async () => {
+  // do something exclusive
+  // releases lock when promise resolves or rejects
+});
+
+// doesn't "block", just tells us if the lock is available
+const isLockAvailable = await mutex.tryLock();
+if (isLockAvailable) {
+  // we are now responsible for manually releasing the lock
+  // do something...
+  await mutex.unlock();
+} else {
+  throw new Error("the lock is already being used somewhere else");
+}
+```
+
+See [./test](./test) for more usage examples.
+
 ## CLI Usage
 
 A `withlock` command line utility is provided to make to facilitate the
@@ -130,37 +157,3 @@ Release shared lock.
 #### mutex.withLockShared(fn)
 
 Same as `withLock()` but using a shared lock.
-
-## Example
-
-```javascript
-import advisoryLock from "advisory-lock";
-const mutex = advisoryLock("postgres://user:pass@localhost:3475/dbname")(
-  "some-lock-name"
-);
-
-const doSomething = () => {
-  // doSomething
-  return Promise.resolve();
-};
-
-mutex
-  .withLock(doSomething) // "blocks" until lock is free
-  .catch((err) => {
-    // this gets executed if the postgres connection closes unexpectedly, etc.
-  })
-  .then(() => {
-    // lock is released now...
-  });
-
-// doesn't "block"
-mutex.tryLock().then((obtainedLock) => {
-  if (obtainedLock) {
-    return doSomething().then(() => mutex.unlock());
-  } else {
-    throw new Error("failed to obtain lock");
-  }
-});
-```
-
-See [./test](./test) for more usage examples.
