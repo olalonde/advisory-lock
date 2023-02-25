@@ -15,9 +15,9 @@
     "preversion": "npm test",
     "prepublishOnly": "npm run build && npm run test",
     "pretest": "npm run lint && npm run build && npm run test:createTestDatabase",
-    "test": "npm run test:quick",
+    "test": "npm run test:only",
     "test:only": "tape build/test/*.test.js",
-    "dev": "nodemon --exec npm -- run test:quick"
+    "dev": "nodemon --exec npm -- run test:only"
   },
   "repository": {
     "type": "git",
