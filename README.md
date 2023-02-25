@@ -53,13 +53,13 @@ await mutex.withLock(async () => {
 });
 
 // doesn't "block", just tells us if the lock is available
-const isLockAvailable = await mutex.tryLock();
-if (isLockAvailable) {
+const unlock = await mutex.tryLock();
+if (unlock) {
   // we are now responsible for manually releasing the lock
   // do something...
-  await mutex.unlock();
+  await unlock();
 } else {
-  throw new Error("the lock is already being used somewhere else");
+  throw new Error("could not acquire lock");
 }
 ```
 
@@ -97,16 +97,6 @@ withlock dbmigration -- npm run knex migrate:latest
 
 Returns a `createMutex` function.
 
-The `createMutex` function also exposes a `client` property
-that can be used to terminate the database connection if necessary.
-
-PS: Each call to `advisoryLock(connectionString)` creates a new PostgreSQL
-connection which is not automatically terminated, so if that is an
-[issue for you](https://github.com/olalonde/advisory-lock/issues/1), you
-can use `createMutex.client.end()` to end the connection when
-appropriate (e.g. after releasing a lock). This is however typically
-not needed since usually, `advisoryLock()` only needs to be called once.
-
 ### createMutex(lockName)
 
 - `lockName` must be a unique identifier for the lock
@@ -121,23 +111,16 @@ see [PosgtreSQL's manual](http://www.postgresql.org/docs/current/static/function
 
 #### mutex.withLock(fn)
 
-- `fn` Promise returning function or regular function to be executed once the lock is acquired
+- `fn` Function to be executed once the lock is acquired.
 
-Like `lock()` but automatically release the lock after `fn()` resolves.
+Like `lock()` but automatically release the lock after `fn()` is executed.
 
-Returns a promise which resolves to the value `fn` resolves to.
+Returns the value returned by `fn()`.
 
-Throws an error if the Postgres connection closes unexpectedly.
+#### mutex.tryLock(): UnlockFunction
 
-#### mutex.tryLock()
+Returns an `unlock()` function if the lock was acquired and `undefined` otherwise.
 
-Returns a promise which resolves to `true` if the lock is free and
-`false` if the lock is taken. Doesn't "block".
+#### mutex.lock(): UnlockFunction
 
-#### mutex.lock()
-
-Wait until we get exclusive lock.
-
-#### mutex.unlock()
-
-Release the exclusive lock.
+Blocks and waits for lock acquisition and returns an `unlock()` function.

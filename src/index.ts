@@ -1,4 +1,4 @@
-import pg from "pg";
+import pg, { Pool } from "pg";
 import { createHash } from "crypto";
 import initDebug from "debug";
 
@@ -17,127 +17,115 @@ export const strToKey = (name: string): AdvisoryKey => {
   return [buf.readInt32LE(0), buf.readInt32LE(4)];
 };
 
-// Patches client so that unref works as expected... Node terminates
-// only if there are not pending queries
-const patchClient = (client: pg.Client) => {
-  const connect = client.connect.bind(client);
-  const query = client.query.bind(client);
-  let refCount = 0;
-
-  const ref = () => {
-    refCount++;
-    /* @ts-ignore */
-    client.connection.stream.ref();
-  };
-  const unref = () => {
-    refCount--;
-    /* @ts-ignore */
-    if (!refCount) client.connection.stream.unref();
-  };
-
-  const wrap =
-    (fn: Function) =>
-    (...args: []) => {
-      ref();
-      const lastArg = args[args.length - 1];
-      const lastArgIsCb = typeof lastArg === "function";
-      const outerCb = lastArgIsCb ? lastArg : noop;
-      if (lastArgIsCb) args.pop();
-      const cb = (...cbArgs: []) => {
-        unref();
-        outerCb(...cbArgs);
-      };
-      /* @ts-ignore */
-      args.push(cb);
-      return fn(...args);
-    };
-
-  client.connect = wrap(connect);
-  client.query = wrap(query);
-  return client;
-};
+// TODO: fix unref?
 
 type AdvisoryKey = [number, number];
 
-const query = (client: pg.Client, lockFn: string, [key1, key2]: AdvisoryKey) =>
-  new Promise((resolve, reject) => {
-    const sql = `SELECT ${lockFn}(${key1}, ${key2})`;
-    debug(`query: ${sql}`);
-    client.query(sql, (err, result) => {
-      if (err) {
-        debug(err);
-        return reject(err);
-      }
-      resolve(result.rows[0][lockFn]);
-    });
-  });
-
-// Pauses promise chain until pg client is connected
-const initWaitForConnection = (client: pg.Client) => {
-  const queue: [(value?: any) => void, (err: any) => void][] = [];
-  let waitForConnect = true;
-  debug("connecting");
-
-  client.connect((err) => {
-    waitForConnect = false;
-    if (err) {
-      debug("connection error");
-      debug(err);
-      queue.forEach(([, reject]) => reject(err));
-    } else {
-      debug("connected");
-      queue.forEach(([resolve]) => resolve());
-    }
-  });
-  return () =>
-    new Promise<void>((resolve, reject) => {
-      if (!waitForConnect) return resolve();
-      debug("waiting for connection");
-      queue.push([resolve, reject]);
-    });
-};
-
-interface FunctionObject {
-  [key: string]: (...args: any[]) => any;
+async function query(
+  client: pg.Client,
+  lockFn: string,
+  [key1, key2]: AdvisoryKey
+): Promise<boolean> {
+  const sql = `SELECT ${lockFn}(${key1}, ${key2})`;
+  debug(`query: ${sql}`);
+  const result = await client.query(sql);
+  return result.rows[0][lockFn] as boolean;
 }
 
-export default (conString: string) => {
-  debug(`connection string: ${conString}`);
-  const client = patchClient(new pg.Client(conString));
-  const waitForConnection = initWaitForConnection(client);
-  // TODO: client.connection.stream.unref()?
+interface CreateMutexFunction {
+  (lockName: string): AdvisoryLock;
+}
 
-  const createMutex = (name: string) => {
+type WithLockFunction = (fn: () => Promise<unknown>) => Promise<unknown>;
+
+type UnlockFn = () => Promise<void>;
+
+interface AdvisoryLock {
+  lock: () => Promise<UnlockFn>;
+  unlock: UnlockFn;
+  tryLock: () => Promise<UnlockFn | undefined>;
+  withLock: WithLockFunction;
+}
+
+export default (conString: string): CreateMutexFunction => {
+  debug(`connection string: ${conString}`);
+
+  const createMutex: CreateMutexFunction = (name: string) => {
     const key = typeof name === "string" ? strToKey(name) : name;
 
-    const lock = () => query(client, "pg_advisory_lock", key);
-    const unlock = () => query(client, "pg_advisory_unlock", key);
-    const tryLock = () => query(client, "pg_try_advisory_lock", key);
+    async function newClient(): Promise<pg.Client> {
+      const client = new pg.Client({
+        connectionString: conString,
+      });
+      await client.connect();
+      return client;
+    }
+
+    // for backwards compatibility...
+    let cachedUnlock: undefined | UnlockFn;
+    async function unlock() {
+      if (cachedUnlock) {
+        return cachedUnlock();
+      }
+      // no op
+    }
+
+    // lock and unlock share a client because the lock is tied to a connection
+    async function lock(): Promise<UnlockFn> {
+      const client = await newClient();
+      try {
+        await query(client, "pg_advisory_lock", key);
+        // For backwards compatibility we assign it to unlock
+        const unlockFn = async function unlock() {
+          try {
+            await query(client, "pg_advisory_unlock", key);
+          } finally {
+            client.end();
+          }
+        };
+        cachedUnlock = unlockFn;
+        return unlockFn;
+      } catch (err) {
+        client.end();
+        throw err;
+      }
+    }
+
+    async function tryLock() {
+      const client = await newClient();
+      try {
+        const obtained = await query(client, "pg_try_advisory_lock", key);
+        if (obtained) {
+          // For backwards compatibility we assign it to unlock
+          const unlockFn = async function unlock() {
+            try {
+              await query(client, "pg_advisory_unlock", key);
+            } finally {
+              client.end();
+            }
+          };
+          cachedUnlock = unlockFn;
+          return unlockFn;
+        } else {
+          client.end();
+        }
+      } catch (err) {
+        client.end();
+        throw err;
+      }
+    }
 
     // TODO: catch db disconnection errors?
-    const withLock = (fn: () => void) =>
-      lock().then(() =>
-        Promise.resolve()
-          .then(fn)
-          .then(
-            (res) => unlock().then(() => res),
-            (err) =>
-              unlock().then(() => {
-                throw err;
-              })
-          )
-      );
+    const withLock: WithLockFunction = async function (fn = async () => {}) {
+      const unlock = await lock();
+      try {
+        return await fn();
+      } finally {
+        await unlock();
+      }
+    };
 
-    const fns: FunctionObject = { lock, unlock, tryLock, withLock };
-
-    // "Block" function calls until client is connected
-    const guardedFns: FunctionObject = {};
-    Object.keys(fns).forEach((fnName) => {
-      guardedFns[fnName] = (...args) =>
-        waitForConnection().then(() => fns[fnName](...args));
-    });
-    return guardedFns;
+    return { lock, unlock, tryLock, withLock };
   };
-  createMutex.client = client;
   return createMutex;
 };

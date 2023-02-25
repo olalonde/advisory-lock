@@ -13,7 +13,7 @@ test("strToKey", (t) => {
   t.end();
 });
 
-test("lock/unlock on same connection", (t) => {
+test("lock/unlock", (t) => {
   t.plan(3);
 
   const getMutex = advisoryLock(conString);
@@ -22,21 +22,21 @@ test("lock/unlock on same connection", (t) => {
 
   let i = 0;
 
-  const testLockUnlock = (iVal) =>
-    lock()
-      .then(() => {
-        t.equal(i, iVal, "i is equal to 0");
-        i++;
-        // wait 300ms before decrementing i
-        return timeout(300);
-      })
-      .then(() => i--)
-      .then(unlock)
-      .catch(t.fail);
-
-  testLockUnlock(0);
-  testLockUnlock(1);
-  testLockUnlock(2);
+  const testLockUnlock = async () => {
+    try {
+      await lock();
+      t.equal(i, 0, `${i} is equal to 0`);
+      i++;
+      await timeout(300);
+      i--;
+      await unlock();
+    } catch (err) {
+      t.fail(err);
+    }
+  };
+  testLockUnlock();
+  testLockUnlock();
+  testLockUnlock();
   // we can acquire lock both times because we're using the same connection
 });
 
@@ -66,48 +66,35 @@ test("lock/unlock on different connections", (t) => {
   testLockUnlock(advisoryLock(conString)("test-lock"));
 });
 
-test("tryLock", (t) => {
+test("tryLock", async (t) => {
+  function assertAcquired(val) {
+    t.equal(typeof val, "function", "acquired");
+  }
+  function assertNotAcquired(val) {
+    t.equal(typeof val, "undefined", "not acquired");
+  }
   const mutex1 = advisoryLock(conString)("test-try-lock");
   const mutex2 = advisoryLock(conString)("test-try-lock");
-  mutex1
-    .tryLock()
-    .then((obtained) => {
-      t.equal(obtained, true);
-    })
-    .then(() => mutex2.tryLock())
-    .then((obtained) => {
-      t.equal(obtained, false);
-    })
-    .then(() => mutex1.unlock())
-    .then(() => mutex2.tryLock())
-    .then((obtained) => {
-      t.equal(obtained, true);
-    })
-    .then(() => mutex1.tryLock())
-    .then((obtained) => {
-      t.equal(obtained, false);
-    })
-    .then(() => mutex2.unlock())
-    .then(() => t.end())
-    .catch(t.fail);
+  assertAcquired(await mutex1.tryLock());
+  assertNotAcquired(await mutex2.tryLock());
+  await mutex1.unlock();
+  assertAcquired(await mutex2.tryLock());
+  assertNotAcquired(await mutex1.tryLock());
+  await mutex2.unlock();
 });
 
-test("withLock followed by tryLock", (t) => {
+test("withLock followed by tryLock", async (t) => {
   const mutex1 = advisoryLock(conString)("test-withlock-lock");
   const mutex2 = advisoryLock(conString)("test-withlock-lock");
-  mutex1
-    .withLock(() =>
-      mutex2
-        .tryLock()
-        .then((obtained) => t.equal(obtained, false))
-        .then(() => "someval")
-    )
-    .then((res) => t.equal(res, "someval"))
-    .then(() => mutex2.tryLock())
-    .then((obtained) => t.equal(obtained, true))
-    .then(() => mutex2.unlock())
-    .then(() => t.end())
-    .catch(t.fail);
+  const val = await mutex1.withLock(async () => {
+    const unlock = await mutex2.tryLock();
+    t.equal(typeof unlock, "undefined");
+    return "someval";
+  });
+  t.equal(val, "someval");
+  const unlock = await mutex2.tryLock();
+  t.equal(typeof unlock, "function");
+  await unlock();
 });
 
 test("withLock - no promise", (t) => {
