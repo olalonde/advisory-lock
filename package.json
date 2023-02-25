@@ -13,10 +13,10 @@
     "build": "tsc",
     "release": "npm run build && npm publish && git push && git push --tags",
     "preversion": "npm test",
-    "postversion": "npm run build",
+    "prepublishOnly": "npm run build && npm run test",
     "pretest": "npm run lint && npm run build && npm run test:createTestDatabase",
     "test": "npm run test:quick",
-    "test:quick": "tape build/test/*.test.js",
+    "test:only": "tape build/test/*.test.js",
     "dev": "nodemon --exec npm -- run test:quick"
   },
   "repository": {
