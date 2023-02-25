@@ -34,7 +34,7 @@ a high available distributed lock, have a look at
 
 ## Install
 
-```
+```console
 npm install --save advisory-lock
 ```
 
