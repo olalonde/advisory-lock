@@ -141,19 +141,3 @@ Wait until we get exclusive lock.
 #### mutex.unlock()
 
 Release the exclusive lock.
-
-#### mutex.tryLockShared()
-
-Like `tryLock()` but for shared lock.
-
-#### mutex.lockShared()
-
-While held, this blocks any attempt to obtain an exclusive lock. (e.g.: calls to `.lock()` or `.withLock()`)
-
-#### mutex.unlockShared()
-
-Release shared lock.
-
-#### mutex.withLockShared(fn)
-
-Same as `withLock()` but using a shared lock.
