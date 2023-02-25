@@ -1,6 +1,7 @@
 # advisory-lock
 
-[![Build Status](https://travis-ci.org/olalonde/advisory-lock.svg?branch=master)](https://travis-ci.org/olalonde/advisory-lock)
+[![Build
+Status](https://github.com/olalonde/advisory-lock/actions/workflows/nodejs.yml/badge.svg)](https://github.com/olalonde/advisory-lock/actions/workflows/nodejs.yml)
 
 Distributed\* locking using [PostgreSQL advisory locks](http://www.postgresql.org/docs/current/static/explicit-locking.html#ADVISORY-LOCKS).
 
